@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SMARTPARK-IoT</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <header class="cabecalho">
+        <a href="index.html" class="logo">SMARTPARK <span>Iot</span></a>
+
+        <nav>
+            <a href="#inicio">Inicio</a>
+            <a href="#estacionamentos">Estacionamentos</a>
+            <a href="#reservas">Reservas</a>
+        </nav>
+
+        <a href="#estacionamentos" class="botao">Reservar vaga</a>
+    </header>
+
+    <main>
+        <section id="inicio" class="destaque">
+            <div class="conteudo">
+                <p class="subtitulo">ESTACIANAMENTO INTELIGENTE</p>
+
+                <h1>Encontre sua vaga. <br>
+                    Estacione sem complicação.</h1>
+
+                <p>
+                    Encontre estacionamentos próximos, consulte vagas
+                    disponíveis e reserve seu espaço com antecedência.
+                </p>
+
+                <a href="#estacionamentos" class="botao">
+                    Encontrar estacionamento
+                </a>
+            </div>
+        </section>
+
+        <section class="resumo">
+            <div class="cartao">
+                <h2 id="totalEstacionamentos">2</h2>
+                <p>Estacionamentos cadastrados</p>
+            </div>
+
+            <div class="cartao">
+                <h2 id="vagaDisponiveis">18</h2>
+                <p>Vagas disponíveis</p>
+            </div>
+
+            <div class="cartao">
+                <h2>24</h2>
+                <p>Reservas antecipadas</p>
+            </div>
+        </section>
+
+        <section id="estacionamentos" class="secao">
+            <p class="subtitulo">ENCONTRE SUA VAGA</p>
+            <h2>Estacionamentos disponíveis</h2>
+
+            <p class="descricao">
+                Consulte os locais no mapa e escolha onde deseja estacionar.
+            </p>
+
+            <div id="mapa"></div>
+
+            <div id="listaEstacionamentos" class="estacionamentos"></div>
+        </section>
+
+        <section id="reservas" class="secao reservas">
+            <h2>Minhas reservas</h2>
+            <p>
+                Suas reservas aparecerão aqui depois que você realizar
+                uma reserva no sistema.
+            </p>
+        </section>
+    </main>
+
+    <footer>
+        <p>SMARTPARK Iot © 2026 - Estacionamento inteligente</p>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>
