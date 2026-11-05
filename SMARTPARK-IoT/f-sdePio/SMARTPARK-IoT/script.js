@@ -1,28 +1,83 @@
-const estacionamentos = [
-    {
-        id: 1,
-        nome: "Estacionamento Centro",
-        endereco: "Centro, Salvador - BA",
-        preco: 12.00,
-        vagas: 10,
-        latitude: -12.9714,
-        longitude: -38.5014
-    },
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-app.js";
 
-    {
-        id: 2,
-        nome: "Estacionamento Shopping",
-        endereco: "Caminho das Árvores, Salvador - BA",
-        preco: 15.00,
-        vagas: 8,
-        latitude: -12.9777,
-        longitude: -38.4550
-    }
-];
+import {
+    getFirestore,
+    collection,
+    getDocs
+} from "https://www.gstatic.com/firebasejs/12.5.0/firebase-firestore.js";
+
+const firebaseConfig = {
+    apiKey: "AIzaSyBReFsK4zCJmbN809GXG4h87JxKy89o7kA",
+    authDomain: "smartpark-iot-aa223.firebaseapp.com",
+    projectId: "smartpark-iot-aa223",
+    storageBucket: "smartpark-iot-aa223.firebasestorage.app",
+    messagingSenderId: "291718997447",
+    appId: "1:291718997447:web:33ef4dd846ca9b7297a5e2"
+};
+
+const app = initializeApp(firebaseConfig);
+
+const db = getFirestore(app);
+
+console.log("Firebase conectado!");
+
+const estacionamentos = [];
 
 let minhasReservas = [];
 
 let mapa;
+
+async function carregarEstacionamentos() {
+
+    try {
+
+        const consulta = await getDocs(
+            collection(db, "estacionamentos")
+        );
+
+        estacionamentos.length = 0;
+
+        consulta.forEach((documento) => {
+
+            const dados = documento.data();
+
+            estacionamentos.push({
+
+                id: documento.id,
+
+                nome: dados.nome,
+
+                endereco: dados.endereco,
+
+                preco: Number(dados.precoHora),
+
+                vagas: Number(dados.vagasDisponiveis),
+
+                latitude: Number(dados.latitude),
+
+                longitude: Number(dados.longitude)
+
+            });
+
+        });
+
+        console.log("Estacionamentos carregados:", estacionamentos);
+
+        iniciarMapa();
+
+        mostrarEstacionamentos();
+
+        mostrarReservas();
+
+    } catch (erro) {
+
+        console.error("Erro ao buscar estacionamentos:", erro);
+
+        document.getElementById("listaEstacionamentos").innerHTML =
+            "<p>Não foi possível carregar os estacionamentos.</p>";
+
+    }
+}
 
 function iniciarMapa() {
 
@@ -32,9 +87,13 @@ function iniciarMapa() {
         return;
     }
 
+    if (mapa) {
+        mapa.remove();
+    }
+
     mapa = L.map("mapa").setView(
-        [-12.9714, -38.5014],
-        13
+        [-12.2664, -38.9663],
+        14
     );
 
     L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -57,6 +116,7 @@ function iniciarMapa() {
         `);
 
     });
+
 }
 
 function mostrarEstacionamentos() {
@@ -232,6 +292,8 @@ function reservarVaga(id) {
     );
 }
 
+window.reservarVaga = reservarVaga;
+
 function mostrarReservas() {
 
     const secao = document.getElementById("reservas");
@@ -285,7 +347,6 @@ function mostrarReservas() {
     });
 }
 
-
 document.addEventListener("DOMContentLoaded", () => {
 
     iniciarMapa();
@@ -293,5 +354,7 @@ document.addEventListener("DOMContentLoaded", () => {
     mostrarEstacionamentos();
 
     mostrarReservas();
+
+     carregarEstacionamentos();
 
 });
