@@ -1,9 +1,13 @@
+import { Map as MapLibreMap, Marker, Popup }
+from "https://unpkg.com/maplibre-gl@6.11.2/dist/maplibre-gl.mjs";
+
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-app.js";
 
 import {
     getFirestore,
     collection,
-    getDocs
+    getDocs,
+    addDoc
 } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -27,93 +31,139 @@ let minhasReservas = [];
 
 let mapa;
 
-async function carregarEstacionamentos() {
+async function carregarReservas() {
 
     try {
 
         const consulta = await getDocs(
-            collection(db, "estacionamentos")
+            collection(db, "reservas")
         );
 
-        estacionamentos.length = 0;
+        minhasReservas = [];
 
         consulta.forEach((documento) => {
 
             const dados = documento.data();
 
-            estacionamentos.push({
+            minhasReservas.push({
 
                 id: documento.id,
 
-                nome: dados.nome,
+                estacionamentoId: dados.estacionamentoId,
 
-                endereco: dados.endereco,
+                estacionamento: dados.estacionamento,
 
-                preco: Number(dados.precoHora),
+                data: dados.data,
 
-                vagas: Number(dados.vagasDisponiveis),
+                chegada: dados.chegada,
 
-                latitude: Number(dados.latitude),
+                saida: dados.saida,
 
-                longitude: Number(dados.longitude)
+                inicio: new Date(dados.inicio),
+
+                fim: new Date(dados.fim),
+
+                valor: dados.valor,
+
+                status: dados.status
 
             });
 
         });
 
-        console.log("Estacionamentos carregados:", estacionamentos);
-
-        iniciarMapa();
-
-        mostrarEstacionamentos();
+        console.log("Reservas carregadas:", minhasReservas);
 
         mostrarReservas();
 
     } catch (erro) {
 
-        console.error("Erro ao buscar estacionamentos:", erro);
+        console.error("Erro ao carregar reservas:", erro);
+
+    }
+
+}
+
+async function carregarEstacionamentos() {
+    try {
+        const resposta = await fetch(
+            "http://127.0.0.1:5000/api/estacionamentos"
+        );
+
+        if (!resposta.ok) {
+            throw new Error("Erro ao consultar o backend.");
+        }
+
+        const dados = await resposta.json();
+
+        estacionamentos.length = 0;
+
+        dados.forEach(dadosEstacionamento => {
+            estacionamentos.push({
+                id: dadosEstacionamento.id,
+                nome: dadosEstacionamento.nome,
+                endereco: dadosEstacionamento.endereco,
+                preco: Number(dadosEstacionamento.precoHora),
+                vagas: Number(dadosEstacionamento.vagasDisponiveis),
+                latitude: Number(dadosEstacionamento.latitude),
+                longitude: Number(dadosEstacionamento.longitude)
+            });
+        });
+
+        console.log("Estacionamentos carregados pelo Flask:", estacionamentos);
+
+        iniciarMapa();
+        mostrarEstacionamentos();
+        mostrarReservas();
+
+    } catch (erro) {
+        console.error("Erro ao carregar estacionamentos:", erro);
 
         document.getElementById("listaEstacionamentos").innerHTML =
             "<p>Não foi possível carregar os estacionamentos.</p>";
-
     }
 }
 
 function iniciarMapa() {
 
-    if (typeof L === "undefined") {
-        document.getElementById("mapa").innerHTML =
-            "Não foi possível carregar o mapa. Verifique sua conexão.";
-        return;
-    }
-
     if (mapa) {
         mapa.remove();
     }
 
-    mapa = L.map("mapa").setView(
-        [-12.2664, -38.9663],
-        14
-    );
+    mapa = new MapLibreMap({
+        container: "mapa",
+        style: "https://tiles.openfreemap.org/styles/liberty",
+        center: [-38.9663, -12.2664],
+        zoom: 14
+    });
 
-    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        attribution: '&copy; OpenStreetMap contributors',
-        maxZoom: 19
-    }).addTo(mapa);
+    mapa.on("load", () => {
 
-    estacionamentos.forEach(estacionamento => {
+        estacionamentos.forEach(estacionamento => {
 
-        L.marker([
-            estacionamento.latitude,
-            estacionamento.longitude
-        ])
-        .addTo(mapa)
-        .bindPopup(`
-            <strong>${estacionamento.nome}</strong><br>
-            ${estacionamento.endereco}<br>
-            R$ ${estacionamento.preco.toFixed(2)} por hora<br>
-            Vagas disponíveis: ${estacionamento.vagas}
-        `);
+            const latitude = Number(estacionamento.latitude);
+            const longitude = Number(estacionamento.longitude);
+            const preco = Number(estacionamento.preco);
+
+            if (
+                !Number.isFinite(latitude) ||
+                !Number.isFinite(longitude)
+            ) {
+                return;
+            }
+
+            const popup = new Popup().setHTML(`
+                <strong>${estacionamento.nome}</strong><br>
+                ${estacionamento.endereco}<br>
+                R$ ${preco.toFixed(2)} por hora<br>
+                Vagas disponíveis: ${estacionamento.vagas}
+            `);
+
+            new Marker()
+                .setLngLat([longitude, latitude])
+                .setPopup(popup)
+                .addTo(mapa);
+
+        });
 
     });
 
@@ -147,12 +197,18 @@ function mostrarEstacionamentos() {
 
             <button
                 class="botao"
-                onclick="reservarVaga(${estacionamento.id})"
+                data-id="${estacionamento.id}"
                 ${estacionamento.vagas <= 0 ? "disabled" : ""}
             >
                 ${estacionamento.vagas > 0 ? "Reservar vaga" : "Sem vagas"}
             </button>
         `;
+
+        const botao = cartao.querySelector("button");
+
+        botao.addEventListener("click", () => {
+            reservarVaga(estacionamento.id);
+        });
 
         lista.appendChild(cartao);
 
@@ -177,7 +233,7 @@ function atualizarResumo() {
         totalVagas;
 }
 
-function reservarVaga(id) {
+async function reservarVaga(id) {
 
     const estacionamento = estacionamentos.find(
         item => item.id === id
@@ -206,8 +262,9 @@ function reservarVaga(id) {
         return;
     }
 
+    // Validar data
     if (!/^\d{4}-\d{2}-\d{2}$/.test(data)) {
-        alert("Data inválida. Utilize o formato AAAA-MM-DD.");
+        alert("Data inválida. Utilize AAAA-MM-DD.");
         return;
     }
 
@@ -221,6 +278,7 @@ function reservarVaga(id) {
         return;
     }
 
+    // Validar horários
     const formatoHora = /^([01]\d|2[0-3]):[0-5]\d$/;
 
     if (!formatoHora.test(chegada) || !formatoHora.test(saida)) {
@@ -236,63 +294,79 @@ function reservarVaga(id) {
         return;
     }
 
-    const minutos = (fim - inicio) / 60000;
+    try {
 
-    const horas = minutos / 60;
+        // Enviar reserva para o Flask
+        const resposta = await fetch(
+            "http://127.0.0.1:5000/api/reservas",
+            {
+                method: "POST",
 
-    const valor = horas * estacionamento.preco;
+                headers: {
+                    "Content-Type": "application/json"
+                },
 
-    const conflito = minhasReservas.some(reserva => {
+                body: JSON.stringify({
+                    estacionamentoId: id,
+                    data: data,
+                    chegada: chegada,
+                    saida: saida
+                })
+            }
+        );
 
-        if (
-            reserva.estacionamentoId !== id ||
-            reserva.data !== data
-        ) {
-            return false;
+        const resultado = await resposta.json();
+
+        if (!resposta.ok) {
+            throw new Error(
+                resultado.erro || "Não foi possível realizar a reserva."
+            );
         }
 
-        return (
-            inicio < reserva.fim &&
-            fim > reserva.inicio
+        const dadosReserva = resultado.reserva;
+
+        // Atualizar informações locais
+        const reserva = {
+            id: dadosReserva.id,
+            estacionamentoId: id,
+            estacionamento: dadosReserva.estacionamento,
+            data: data,
+            chegada: chegada,
+            saida: saida,
+            inicio: inicio,
+            fim: fim,
+            valor: Number(dadosReserva.valor),
+            status: "Pendente de pagamento"
+        };
+
+        minhasReservas.push(reserva);
+
+        estacionamento.vagas = Number(
+            dadosReserva.vagasDisponiveis
         );
-    });
 
-    if (conflito) {
-        alert("Já existe uma reserva neste horário. Escolha outro período.");
-        return;
+        mostrarEstacionamentos();
+        mostrarReservas();
+
+        alert(
+            "Reserva salva com sucesso!\n\n" +
+            "Estacionamento: " + estacionamento.nome +
+            "\nValor estimado: R$ " +
+            Number(dadosReserva.valor).toFixed(2) +
+            "\nStatus: Pendente de pagamento"
+        );
+
+    } catch (erro) {
+
+        console.error("Erro ao realizar reserva:", erro);
+
+        alert(erro.message || "Não foi possível salvar a reserva.");
+
     }
-
-    const reserva = {
-        id: Date.now(),
-        estacionamentoId: id,
-        estacionamento: estacionamento.nome,
-        data: data,
-        chegada: chegada,
-        saida: saida,
-        inicio: inicio,
-        fim: fim,
-        valor: valor,
-        status: "Pendente de pagamento"
-    };
-
-    minhasReservas.push(reserva);
-
-    estacionamento.vagas--;
-
-    mostrarEstacionamentos();
-
-    mostrarReservas();
-
-    alert(
-        "Reserva criada!\n\n" +
-        "Estacionamento: " + estacionamento.nome +
-        "\nValor estimado: R$ " + valor.toFixed(2) +
-        "\nStatus: Pendente de pagamento\n\n" +
-        "A reserva ainda não está confirmada."
-    );
 }
 
 window.reservarVaga = reservarVaga;
+
 
 function mostrarReservas() {
 
@@ -300,23 +374,22 @@ function mostrarReservas() {
 
     let lista = document.getElementById("listaReservas");
 
+    if (!secao) {
+        console.error("Seção de reservas não encontrada!");
+        return;
+    }
+
     if (!lista) {
-
         lista = document.createElement("div");
-
         lista.id = "listaReservas";
-
         lista.className = "estacionamentos";
-
         secao.appendChild(lista);
     }
 
     lista.innerHTML = "";
 
     if (minhasReservas.length === 0) {
-
         lista.innerHTML = "<p>Você ainda não possui reservas.</p>";
-
         return;
     }
 
@@ -326,20 +399,22 @@ function mostrarReservas() {
 
         cartao.className = "estacionamento";
 
+        const valor = Number(reserva.valor ?? 0);
+
         cartao.innerHTML = `
-            <h3>${reserva.estacionamento}</h3>
+            <h3>${reserva.estacionamento || "Estacionamento"}</h3>
 
-            <p>Data: ${reserva.data}</p>
+            <p>Data: ${reserva.data || "Não informada"}</p>
 
-            <p>Chegada: ${reserva.chegada}</p>
+            <p>Chegada: ${reserva.chegada || "Não informada"}</p>
 
-            <p>Saída: ${reserva.saida}</p>
+            <p>Saída: ${reserva.saida || "Não informada"}</p>
 
             <p class="preco">
-                R$ ${reserva.valor.toFixed(2)}
+                R$ ${valor.toFixed(2)}
             </p>
 
-            <p>${reserva.status}</p>
+            <p>${reserva.status || "Pendente"}</p>
         `;
 
         lista.appendChild(cartao);
@@ -347,7 +422,7 @@ function mostrarReservas() {
     });
 }
 
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
 
     iniciarMapa();
 
@@ -355,6 +430,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
     mostrarReservas();
 
-     carregarEstacionamentos();
+    await carregarEstacionamentos();
+
+    await carregarReservas();
 
 });
