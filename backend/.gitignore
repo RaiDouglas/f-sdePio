@@ -1,0 +1,11 @@
+
+# Ambiente virtual
+venv/
+
+# Arquivos de configuração e segredos
+.env
+*.json
+
+# Arquivos temporários do Python
+__pycache__/
+*.pyc
