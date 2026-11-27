@@ -22,7 +22,6 @@ firebase_admin.initialize_app(credencial)
 
 db = firestore.client()
 
-
 @app.route("/", methods=["GET"])
 def inicio():
     return jsonify({
@@ -270,28 +269,92 @@ def solicitar_acesso():
 
         # SAÍDA: não bloquear a saída de um veículo
         # que já teve a entrada registrada.
+        
         if tipo == "EXIT":
 
-            if not reserva.get("entradaRegistrada"):
+            estacionamento_ref = db.collection(
+                "estacionamentos"
+            ).document(estacionamento_id)
+
+            transaction = db.transaction()
+
+            @firestore.transactional
+            def registrar_saida(transaction):
+
+                # Ler os documentos dentro da transação
+                reserva_atual_doc = reserva_ref.get(
+                    transaction=transaction
+                )
+
+                estacionamento_doc = estacionamento_ref.get(
+                    transaction=transaction
+                )
+
+                if not reserva_atual_doc.exists:
+                    return {
+                        "erro": "Reserva não encontrada.",
+                        "codigo": 404
+                    }
+
+                if not estacionamento_doc.exists:
+                    return {
+                        "erro": "Estacionamento não encontrado.",
+                        "codigo": 404
+                    }
+
+                reserva_atual = reserva_atual_doc.to_dict()
+
+                if not reserva_atual.get("entradaRegistrada"):
+                    return {
+                        "erro": "Entrada não registrada para esta reserva.",
+                        "codigo": 403
+                    }
+
+                if reserva_atual.get("saidaRegistrada"):
+                    return {
+                        "erro": "Saída já registrada.",
+                        "codigo": 409
+                    }
+
+                estacionamento = estacionamento_doc.to_dict()
+
+                vagas = int(
+                    estacionamento.get("vagasDisponiveis", 0)
+                )
+
+                total = int(
+                    estacionamento.get("vagasTotais", vagas)
+                )
+
+                novas_vagas = min(vagas + 1, total)
+
+                # Registrar a saída
+                transaction.update(reserva_ref, {
+                    "saidaRegistrada": True,
+                    "saidaEm": agora
+                })
+
+                # Devolver a vaga
+                transaction.update(estacionamento_ref, {
+                    "vagasDisponiveis": novas_vagas
+                })
+
+                return {
+                    "vagasDisponiveis": novas_vagas
+                }
+
+            resultado = registrar_saida(transaction)
+
+            if "erro" in resultado:
                 return jsonify({
                     "authorized": False,
-                    "reason": "Entrada não registrada para esta reserva."
-                }), 403
-
-            if reserva.get("saidaRegistrada"):
-                return jsonify({
-                    "authorized": False,
-                    "reason": "Saída já registrada."
-                }), 409
-
-            reserva_ref.update({
-                "saidaRegistrada": True,
-                "saidaEm": agora
-            })
+                    "reason": resultado["erro"]
+                }), resultado["codigo"]
 
             return jsonify({
                 "authorized": True,
-                "reason": "Saída autorizada."
+                "reason": "Saída autorizada.",
+                "vagasDisponiveis": resultado["vagasDisponiveis"]
             }), 200
 
         # ENTRADA: exige pagamento aprovado.
