@@ -1,6 +1,7 @@
 import os
 import firebase_admin
 import hmac
+import mercadopago
 from zoneinfo import ZoneInfo
 from firebase_admin import credentials, firestore
 from flask import Flask, jsonify, request
@@ -156,7 +157,8 @@ def criar_reserva():
             "inicio": f"{data}T{chegada}:00",
             "fim": f"{data}T{saida}:00",
             "valor": valor,
-            "status": "Pendente de pagamento"
+            "status": "Pendente de pagamento",
+            "statusPagamento": "pending"
         })
 
         # Atualizar vagas disponíveis
@@ -194,7 +196,187 @@ def criar_reserva():
             "erro": "Não foi possível criar a reserva."
         }), 500
 
-    
+# ==========================================
+# CRIAR PAGAMENTO - MERCADO PAGO
+# ==========================================
+
+@app.route("/api/pagamentos/criar", methods=["POST"])
+def criar_pagamento():
+
+    dados = request.get_json(silent=True) or {}
+    reserva_id = dados.get("reservaId")
+
+    if not reserva_id:
+        return jsonify({
+            "erro": "ID da reserva não informado."
+        }), 400
+
+    access_token = os.getenv("MP_ACCESS_TOKEN")
+
+    if not access_token:
+        return jsonify({
+            "erro": "Mercado Pago não configurado no servidor."
+        }), 503
+
+    try:
+        reserva_ref = db.collection("reservas").document(reserva_id)
+        reserva_doc = reserva_ref.get()
+
+        if not reserva_doc.exists:
+            return jsonify({
+                "erro": "Reserva não encontrada."
+            }), 404
+
+        reserva = reserva_doc.to_dict()
+
+        if reserva.get("statusPagamento") == "approved":
+            return jsonify({
+                "erro": "Esta reserva já está paga."
+            }), 409
+
+        valor = float(reserva.get("valor", 0))
+
+        if valor <= 0:
+            return jsonify({
+                "erro": "Valor da reserva inválido."
+            }), 400
+
+        sdk = mercadopago.SDK(access_token)
+
+        preferencia = {
+            "items": [
+                {
+                    "title": (
+                        "Reserva - " +
+                        reserva.get("estacionamento", "SmartPark")
+                    ),
+                    "quantity": 1,
+                    "unit_price": valor,
+                    "currency_id": "BRL"
+                }
+            ],
+            "external_reference": reserva_id,
+            "notification_url": "https://smartpark-backend-2t4g.onrender.com/api/pagamentos/webhook",
+            "back_urls": {
+                "success": "https://raidouglas.github.io/f-sdePio/?pagamento=sucesso",
+                "failure": "https://raidouglas.github.io/f-sdePio/?pagamento=falha",
+                "pending": "https://raidouglas.github.io/f-sdePio/?pagamento=pendente"
+            },
+            "auto_return": "approved"
+        }
+
+        resposta_mp = sdk.preference().create(preferencia)
+
+        if resposta_mp.get("status") not in [200, 201]:
+            app.logger.error(
+                "Erro ao criar preferência: %s",
+                resposta_mp
+            )
+
+            return jsonify({
+                "erro": "Não foi possível criar o pagamento."
+            }), 502
+
+        resultado = resposta_mp.get("response", {})
+
+        link_pagamento = (
+            resultado.get("sandbox_init_point")
+            or resultado.get("init_point")
+        )
+
+        if not link_pagamento:
+            return jsonify({
+                "erro": "Link de pagamento não recebido."
+            }), 502
+
+        reserva_ref.update({
+            "preferenciaPagamentoId": resultado.get("id")
+        })
+
+        return jsonify({
+            "mensagem": "Pagamento criado com sucesso!",
+            "checkout_url": link_pagamento
+        }), 200
+
+    except Exception:
+        app.logger.exception("Erro ao criar pagamento")
+
+        return jsonify({
+            "erro": "Erro interno ao criar pagamento."
+        }), 500
+
+# ==========================================
+# CONFIRMAR PAGAMENTO - WEBHOOK MERCADO PAGO
+# ==========================================
+
+@app.route("/api/pagamentos/webhook", methods=["POST"])
+def webhook_pagamento():
+
+    access_token = os.getenv("MP_ACCESS_TOKEN")
+
+    if not access_token:
+        return jsonify({"erro": "Mercado Pago não configurado."}), 503
+
+    dados = request.get_json(silent=True) or {}
+
+    pagamento_id = (
+        dados.get("data", {}).get("id")
+        or request.args.get("data.id")
+        or request.args.get("id")
+    )
+
+    if not pagamento_id:
+        return jsonify({"mensagem": "Notificação recebida."}), 200
+
+    try:
+        sdk = mercadopago.SDK(access_token)
+        resposta = sdk.payment().get(str(pagamento_id))
+
+        if resposta.get("status") != 200:
+            return jsonify({"erro": "Não foi possível consultar o pagamento."}), 502
+
+        pagamento = resposta.get("response", {})
+
+        if pagamento.get("status") != "approved":
+            return jsonify({"mensagem": "Pagamento ainda não aprovado."}), 200
+
+        reserva_id = pagamento.get("external_reference")
+
+        if not reserva_id:
+            return jsonify({"erro": "Reserva não identificada."}), 400
+
+        reserva_ref = db.collection("reservas").document(reserva_id)
+        reserva_doc = reserva_ref.get()
+
+        if not reserva_doc.exists:
+            return jsonify({"erro": "Reserva não encontrada."}), 404
+
+        reserva = reserva_doc.to_dict()
+
+        valor_pago = round(float(pagamento.get("transaction_amount", 0)), 2)
+        valor_reserva = round(float(reserva.get("valor", 0)), 2)
+
+        if (
+            pagamento.get("currency_id") != "BRL"
+            or valor_pago != valor_reserva
+        ):
+            return jsonify({"erro": "Valor ou moeda do pagamento inválido."}), 400
+
+        reserva_ref.update({
+            "statusPagamento": "approved",
+            "status": "Confirmada",
+            "pagamentoId": str(pagamento_id)
+        })
+
+        return jsonify({
+            "mensagem": "Pagamento confirmado com sucesso!"
+        }), 200
+
+    except Exception:
+        app.logger.exception("Erro no webhook do Mercado Pago")
+        return jsonify({"erro": "Erro ao confirmar pagamento."}), 500
+
+
 # ==========================================
 # AUTENTICAÇÃO DO ESP32
 # ==========================================
@@ -207,7 +389,6 @@ def validar_dispositivo():
         return False
 
     return hmac.compare_digest(segredo_servidor, segredo_recebido)
-
 
 # ==========================================
 # SOLICITAÇÃO DE ENTRADA E SAÍDA
@@ -414,6 +595,92 @@ def solicitar_acesso():
             "reason": "Erro interno ao validar acesso."
         }), 500
 
+
+@app.route("/api/iot/reserva-ativa", methods=["GET"])
+def obter_reserva_ativa():
+
+    if not validar_dispositivo():
+        return jsonify({
+            "authorized": False,
+            "reason": "Dispositivo não autenticado."
+        }), 401
+
+    estacionamento_id = request.args.get("parking_lot_id")
+
+    if estacionamento_id != "89vAPnNFZ95HFsWAr3h9":
+        return jsonify({
+            "authorized": False,
+            "reason": "Estacionamento inválido."
+        }), 403
+
+    try:
+        agora = datetime.now(ZoneInfo("America/Sao_Paulo"))
+
+        reservas = db.collection("reservas").where(
+            "estacionamentoId", "==", estacionamento_id
+        ).where(
+            "statusPagamento", "==", "approved"
+        ).stream()
+
+        candidatas = []
+
+        for documento in reservas:
+            reserva = documento.to_dict()
+
+            if reserva.get("saidaRegistrada", False):
+                continue
+
+            # Se já entrou, mantém essa reserva disponível
+            # para validar a saída.
+            if reserva.get("entradaRegistrada", False):
+                candidatas.append(documento.id)
+                continue
+
+            # Se ainda não entrou, verifica o horário reservado.
+            try:
+                inicio = datetime.strptime(
+                    f"{reserva.get('data')} {reserva.get('chegada')}",
+                    "%Y-%m-%d %H:%M"
+                ).replace(tzinfo=ZoneInfo("America/Sao_Paulo"))
+
+                fim = datetime.strptime(
+                    f"{reserva.get('data')} {reserva.get('saida')}",
+                    "%Y-%m-%d %H:%M"
+                ).replace(tzinfo=ZoneInfo("America/Sao_Paulo"))
+
+            except (ValueError, TypeError):
+                continue
+
+            if inicio <= agora <= fim:
+                candidatas.append(documento.id)
+
+        if len(candidatas) == 0:
+            return jsonify({
+                "authorized": False,
+                "reason": "Nenhuma reserva paga disponível."
+            }), 404
+
+        if len(candidatas) > 1:
+            return jsonify({
+                "authorized": False,
+                "reason": "Mais de uma reserva disponível. Identificação ambígua."
+            }), 409
+
+        reserva_id = candidatas[0]
+
+        return jsonify({
+            "authorized": True,
+            "reservation_id": reserva_id,
+            "reason": "Reserva localizada."
+        }), 200
+
+    except Exception:
+        app.logger.exception("Erro ao localizar reserva ativa")
+
+        return jsonify({
+            "authorized": False,
+            "reason": "Erro interno ao localizar reserva."
+        }), 500
 
 # ==========================================
 # RECEBER TELEMETRIA DO ESP32
