@@ -10,6 +10,8 @@ import {
     addDoc
 } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-firestore.js";
 
+const API_URL = "https://smartpark-backend-2t4g.onrender.com";
+
 const firebaseConfig = {
     apiKey: "AIzaSyBReFsK4zCJmbN809GXG4h87JxKy89o7kA",
     authDomain: "smartpark-iot-aa223.firebaseapp.com",
@@ -86,7 +88,7 @@ async function carregarReservas() {
 async function carregarEstacionamentos() {
     try {
         const resposta = await fetch(
-            "http://127.0.0.1:5000/api/estacionamentos"
+            `${API_URL}/api/estacionamentos`
         );
 
         if (!resposta.ok) {
@@ -298,7 +300,7 @@ async function reservarVaga(id) {
 
         // Enviar reserva para o Flask
         const resposta = await fetch(
-            "http://127.0.0.1:5000/api/reservas",
+            `${API_URL}/api/reservas`,
             {
                 method: "POST",
 
