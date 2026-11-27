@@ -236,7 +236,6 @@ function atualizarResumo() {
 }
 
 async function reservarVaga(id) {
-
     const estacionamento = estacionamentos.find(
         item => item.id === id
     );
@@ -247,24 +246,14 @@ async function reservarVaga(id) {
     }
 
     const data = prompt("Informe a data da reserva (AAAA-MM-DD):");
-
-    if (data === null || data.trim() === "") {
-        return;
-    }
+    if (data === null || data.trim() === "") return;
 
     const chegada = prompt("Informe o horário de chegada (HH:MM):");
-
-    if (chegada === null || chegada.trim() === "") {
-        return;
-    }
+    if (chegada === null || chegada.trim() === "") return;
 
     const saida = prompt("Informe o horário de saída (HH:MM):");
+    if (saida === null || saida.trim() === "") return;
 
-    if (saida === null || saida.trim() === "") {
-        return;
-    }
-
-    // Validar data
     if (!/^\d{4}-\d{2}-\d{2}$/.test(data)) {
         alert("Data inválida. Utilize AAAA-MM-DD.");
         return;
@@ -280,7 +269,6 @@ async function reservarVaga(id) {
         return;
     }
 
-    // Validar horários
     const formatoHora = /^([01]\d|2[0-3]):[0-5]\d$/;
 
     if (!formatoHora.test(chegada) || !formatoHora.test(saida)) {
@@ -297,25 +285,19 @@ async function reservarVaga(id) {
     }
 
     try {
-
-        // Enviar reserva para o Flask
-        const resposta = await fetch(
-            `${API_URL}/api/reservas`,
-            {
-                method: "POST",
-
-                headers: {
-                    "Content-Type": "application/json"
-                },
-
-                body: JSON.stringify({
-                    estacionamentoId: id,
-                    data: data,
-                    chegada: chegada,
-                    saida: saida
-                })
-            }
-        );
+        // 1. Criar a reserva no backend
+        const resposta = await fetch(`${API_URL}/api/reservas`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                estacionamentoId: id,
+                data: data,
+                chegada: chegada,
+                saida: saida
+            })
+        });
 
         const resultado = await resposta.json();
 
@@ -327,7 +309,7 @@ async function reservarVaga(id) {
 
         const dadosReserva = resultado.reserva;
 
-        // Atualizar informações locais
+        // 2. Atualizar informações locais
         const reserva = {
             id: dadosReserva.id,
             estacionamentoId: id,
@@ -350,20 +332,40 @@ async function reservarVaga(id) {
         mostrarEstacionamentos();
         mostrarReservas();
 
-        alert(
-            "Reserva salva com sucesso!\n\n" +
-            "Estacionamento: " + estacionamento.nome +
-            "\nValor estimado: R$ " +
-            Number(dadosReserva.valor).toFixed(2) +
-            "\nStatus: Pendente de pagamento"
+        // 3. Criar pagamento no Mercado Pago
+        const respostaPagamento = await fetch(
+            `${API_URL}/api/pagamentos/criar`,
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    reservaId: dadosReserva.id
+                })
+            }
         );
 
+        const pagamento = await respostaPagamento.json();
+
+        if (!respostaPagamento.ok) {
+            throw new Error(
+                pagamento.erro || "Não foi possível iniciar o pagamento."
+            );
+        }
+
+        if (!pagamento.checkout_url) {
+            throw new Error("O Mercado Pago não retornou o link de pagamento.");
+        }
+
+        // 4. Redirecionar para o Checkout Pro
+        alert("Reserva criada! Você será encaminhado para o pagamento.");
+
+        window.location.href = pagamento.checkout_url;
+
     } catch (erro) {
-
         console.error("Erro ao realizar reserva:", erro);
-
-        alert(erro.message || "Não foi possível salvar a reserva.");
-
+        alert(erro.message || "Não foi possível concluir a operação.");
     }
 }
 
