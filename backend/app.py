@@ -279,14 +279,16 @@ def criar_pagamento():
 
         resultado = resposta_mp.get("response", {})
 
-        link_pagamento = (
-            resultado.get("sandbox_init_point")
-            or resultado.get("init_point")
-        )
+        link_pagamento = resultado.get("sandbox_init_point")
 
         if not link_pagamento:
+            app.logger.error(
+                "Link de teste não recebido. Campos retornados: %s",
+                list(resultado.keys())
+            )
+
             return jsonify({
-                "erro": "Link de pagamento não recebido."
+                "erro": "Link de pagamento de teste não recebido."
             }), 502
 
         reserva_ref.update({
