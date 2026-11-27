@@ -333,7 +333,14 @@ def webhook_pagamento():
         resposta = sdk.payment().get(str(pagamento_id))
 
         if resposta.get("status") != 200:
-            return jsonify({"erro": "Não foi possível consultar o pagamento."}), 502
+            app.logger.warning(
+                "Pagamento %s não encontrado ou indisponível. Resposta: %s",
+                pagamento_id,
+                resposta
+            )
+            return jsonify({
+                "mensagem": "Pagamento ainda não localizado."
+            }), 200
 
         pagamento = resposta.get("response", {})
 
